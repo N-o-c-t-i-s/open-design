@@ -152,3 +152,62 @@ describe.each(["darwin", "win32"] as const)("%s packaged update entry", platform
     expect(trace.some(event => /^(inspect|bootstrap|select)/.test(event))).toBe(false);
   });
 });
+
+describe("packaged launcher Dock identity", () => {
+  async function bootstrap(platform: string, result: boolean | Error) {
+    const trace: string[] = [];
+    const desktopBoundary = new Error("desktop startup boundary");
+    const entry = evaluate(entryCode, {
+      "@open-design/release": release,
+      "@open-design/launcher-proto": launcherProto,
+      "@open-design/sidecar-proto": sidecarProto,
+      "@open-design/sidecar": {
+        readCurrentSidecarStamp: () => null,
+        bootstrapSidecarProcess: async () => {
+          trace.push("bootstrap");
+          if (result instanceof Error) throw result;
+          return result;
+        },
+      },
+      "electron": { app: {
+        commandLine: { appendSwitch() {} },
+        dock: { hide: () => trace.push("hide-dock") },
+        exit: (code: number) => trace.push(`exit:${code}`),
+      } },
+      "@open-design/desktop/main": { applyOsLocaleSwitch() {}, applyLoopbackConnectionLimitSwitch() {} },
+      "./config.js": { readPackagedConfig: async () => ({ namespace: "default", appVersion: "0.25.0" }) },
+      "./headless-runtime.js": {
+        parsePackagedHeadlessRequest: () => ({ headless: false }),
+        runPackagedMcpActionAgainstExistingDaemon: async () => false,
+      },
+      "./paths.js": { resolvePackagedNamespacePaths: () => ({}) },
+      "./launch.js": { createPackagedSecondInstanceHandoff: () => ({}) },
+      "./payload-desktop-launch.js": { findPackagedDeeplinkArg: () => null },
+      "./launcher-after-quit.js": {
+        waitForLauncherAfterQuit: async () => true,
+        inspectExistingDesktopForLauncher: async () => null,
+        exitPackagedLauncherForExistingDesktop: () => false,
+      },
+      "./managed-headless.js": { supportsDeferredHeadlessDesktop: () => false },
+      "./launcher-runtime.js": { resolvePackagedLauncherRuntime: async () => { throw desktopBoundary; } },
+    }, { process: { argv: ["electron", "index.js"], env: {}, platform } }) as { main: () => Promise<void> };
+    await entry.main().catch(error => { if (error !== desktopBoundary && error !== result) throw error; });
+    return trace;
+  }
+
+  it("hides the macOS outer launcher's Dock identity before exiting after handoff", async () => {
+    expect(await bootstrap("darwin", true)).toEqual(["bootstrap", "hide-dock", "exit:0"]);
+  });
+
+  it.each(["win32", "linux"])("preserves the %s launcher exit", async platform => {
+    expect(await bootstrap(platform, true)).toEqual(["bootstrap", "exit:0"]);
+  });
+
+  it("keeps the actual macOS desktop's Dock identity", async () => {
+    expect(await bootstrap("darwin", false)).toEqual(["bootstrap"]);
+  });
+
+  it("does not hide the Dock identity when bootstrap fails", async () => {
+    expect(await bootstrap("darwin", new Error("bootstrap failed"))).toEqual(["bootstrap"]);
+  });
+});

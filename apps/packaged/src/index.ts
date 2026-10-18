@@ -222,6 +222,9 @@ async function main(): Promise<void> {
     port: 0,
     runtimeRoot: initialPaths.runtimeRoot,
   })) {
+    // LaunchServices retains this launcher while its supervised children live.
+    // Only the actual desktop process should keep a Dock identity.
+    if (process.platform === "darwin") app.dock.hide();
     app.exit(0);
     return;
   }
