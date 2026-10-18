@@ -154,7 +154,7 @@ describe.each(["darwin", "win32"] as const)("%s packaged update entry", platform
 });
 
 describe("packaged launcher Dock identity", () => {
-  async function bootstrap(platform: string, result: boolean | Error) {
+  async function bootstrap(platform: string, result: boolean | Error, hasDock = true) {
     const trace: string[] = [];
     const desktopBoundary = new Error("desktop startup boundary");
     const entry = evaluate(entryCode, {
@@ -171,7 +171,7 @@ describe("packaged launcher Dock identity", () => {
       },
       "electron": { app: {
         commandLine: { appendSwitch() {} },
-        dock: { hide: () => trace.push("hide-dock") },
+        dock: hasDock ? { hide: () => trace.push("hide-dock") } : undefined,
         exit: (code: number) => trace.push(`exit:${code}`),
       } },
       "@open-design/desktop/main": { applyOsLocaleSwitch() {}, applyLoopbackConnectionLimitSwitch() {} },
@@ -201,6 +201,10 @@ describe("packaged launcher Dock identity", () => {
 
   it.each(["win32", "linux"])("preserves the %s launcher exit", async platform => {
     expect(await bootstrap(platform, true)).toEqual(["bootstrap", "exit:0"]);
+  });
+
+  it("exits safely when the macOS Dock API is unavailable", async () => {
+    expect(await bootstrap("darwin", true, false)).toEqual(["bootstrap", "exit:0"]);
   });
 
   it("keeps the actual macOS desktop's Dock identity", async () => {
